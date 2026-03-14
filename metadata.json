@@ -1,0 +1,5 @@
+{
+  "name": "Net Market",
+  "description": "Une plateforme de marché local au Bénin avec gestion d'articles, géolocalisation, commandes, thèmes personnalisés et suppression de compte.",
+  "requestFramePermissions": ["geolocation"]
+}

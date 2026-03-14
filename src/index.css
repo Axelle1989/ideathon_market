@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-primary: var(--color-slate-900);
+  --color-primary-hover: var(--color-slate-800);
+  --color-primary-light: var(--color-slate-50);
+  --color-primary-border: var(--color-slate-200);
+  
+  --color-accent: var(--color-blue-600);
+  --color-accent-hover: var(--color-blue-700);
+  --color-accent-light: var(--color-blue-50);
+  --color-accent-border: var(--color-blue-200);
+}
+
+@layer base {
+  body {
+    @apply antialiased transition-colors duration-500;
+  }
+}
+
+.theme-default {
+  @apply bg-slate-50 text-slate-900;
+}
+
+.theme-noir-vert {
+  @apply bg-slate-950 text-emerald-50;
+}
+
+.theme-noir-vert .bg-white {
+  @apply bg-slate-900 border-slate-800;
+}
+
+.theme-noir-vert .text-slate-900 {
+  @apply text-white;
+}
+
+.theme-noir-vert .text-slate-400 {
+  @apply text-emerald-500/60;
+}
+
+.theme-noir-vert .bg-blue-600 {
+  @apply bg-emerald-600;
+}
+
+.theme-noir-vert .text-blue-600 {
+  @apply text-emerald-500;
+}
+
+.theme-bleu-noir {
+  @apply bg-slate-950 text-blue-50;
+}
+
+.theme-bleu-noir .bg-white {
+  @apply bg-slate-900 border-slate-800;
+}
+
+.theme-bleu-noir .text-slate-900 {
+  @apply text-white;
+}
+
+.theme-bleu-noir .text-slate-400 {
+  @apply text-blue-400/60;
+}
+
+.theme-bleu-noir .bg-blue-600 {
+  @apply bg-blue-600;
+}
+
+.theme-bleu-noir .text-blue-600 {
+  @apply text-blue-400;
+}
+
+.markdown-body {
+  @apply prose prose-slate max-w-none;
+}
+
+.map-container {
+  z-index: 1 !important;
+}
+
+.overlay-content {
+  z-index: 1000 !important;
+  position: relative;
+}
