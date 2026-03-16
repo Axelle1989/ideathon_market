@@ -18,7 +18,7 @@ L.Icon.Default.mergeOptions({
 });
 
 interface Market {
-  id: number;
+  id: string;
   name: string;
   location: string;
   lat: number;
@@ -28,7 +28,7 @@ interface Market {
 }
 
 interface Seller {
-  id: number;
+  id: string;
   name: string;
   shop_name?: string;
   lat?: number;
@@ -41,8 +41,8 @@ interface MapProps {
   sellers?: Seller[];
   onSelectMarket: (market: Market) => void;
   onSelectSeller?: (seller: Seller) => void;
-  selectedMarketId: number | null;
-  selectedSellerId?: number | null;
+  selectedMarketId: string | null;
+  selectedSellerId?: string | null;
   onMapClick?: (lat: number, lng: number) => void;
   onViewSellers?: (market: Market) => void;
   sellerLocation?: { lat: number, lng: number } | null;
@@ -50,7 +50,7 @@ interface MapProps {
   showItinerary?: boolean;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
-  highlightedMarketIds?: number[];
+  highlightedMarketIds?: string[];
 }
 
 const defaultCenter: [number, number] = [6.3654, 2.4183];

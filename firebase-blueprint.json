@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Application user profile",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["buyer", "seller", "both"] },
+        "name": { "type": "string" },
+        "balance": { "type": "number" },
+        "welcome_code": { "type": "string" },
+        "shop_name": { "type": "string" },
+        "seller_type": { "type": "string", "enum": ["boutique", "market"] },
+        "phone": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "bank_info": { "type": "string" },
+        "theme": { "type": "string" }
+      },
+      "required": ["email", "role", "name"]
+    },
+    "Market": {
+      "title": "Market",
+      "description": "Local market location",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" }
+      },
+      "required": ["name", "location", "lat", "lng"]
+    },
+    "Item": {
+      "title": "Item",
+      "description": "Product for sale",
+      "type": "object",
+      "properties": {
+        "seller_id": { "type": "string" },
+        "market_id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "photo": { "type": "string" },
+        "category": { "type": "string" }
+      },
+      "required": ["seller_id", "name", "price"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Purchase order",
+      "type": "object",
+      "properties": {
+        "buyer_id": { "type": "string" },
+        "seller_id": { "type": "string" },
+        "status": { "type": "string" },
+        "total": { "type": "number" },
+        "items": { "type": "array" },
+        "invoice_id": { "type": "string" },
+        "paid": { "type": "boolean" },
+        "delivery_type": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["buyer_id", "seller_id", "total", "invoice_id"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Chat message",
+      "type": "object",
+      "properties": {
+        "sender_id": { "type": "string" },
+        "receiver_id": { "type": "string" },
+        "market_id": { "type": "string" },
+        "content": { "type": "string" },
+        "is_read": { "type": "boolean" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sender_id", "receiver_id", "content"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/markets/{marketId}": {
+      "schema": "Market",
+      "description": "Market locations"
+    },
+    "/items/{itemId}": {
+      "schema": "Item",
+      "description": "Products"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Orders"
+    },
+    "/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Chat messages"
+    }
+  }
+}

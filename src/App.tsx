@@ -30,14 +30,38 @@ import {
   CheckCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { io } from 'socket.io-client';
+import { db, auth } from './firebase';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  serverTimestamp, 
+  orderBy,
+  increment,
+  Timestamp
+} from 'firebase/firestore';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  deleteUser
+} from 'firebase/auth';
 import Map from './components/Map.tsx';
 import Cart from './components/Cart.tsx';
 import ChatBox from './components/ChatBox.tsx';
 
 // --- Types ---
 interface User {
-  id: number;
+  id: string;
   email: string;
   role: 'buyer' | 'seller' | 'both';
   name: string;
@@ -49,10 +73,11 @@ interface User {
   lng?: number;
   bank_info?: string;
   seller_type?: 'boutique' | 'market';
+  theme?: 'default' | 'noir-vert' | 'bleu-noir';
 }
 
 interface Market {
-  id: number;
+  id: string;
   name: string;
   location: string;
   lat: number;
@@ -61,9 +86,9 @@ interface Market {
 }
 
 interface Item {
-  id: number;
-  seller_id: number;
-  market_id: number;
+  id: string;
+  seller_id: string;
+  market_id: string;
   name: string;
   description: string;
   price: number;
@@ -74,7 +99,7 @@ interface Item {
 }
 
 interface Seller {
-  id: number;
+  id: string;
   name: string;
   email: string;
   shop_name?: string;
@@ -84,11 +109,11 @@ interface Seller {
 }
 
 interface CartItem {
-  id: number;
+  id: string;
   name: string;
   price: number;
   quantity: number;
-  seller_id: number;
+  seller_id: string;
 }
 
 // --- API Helpers ---
@@ -112,20 +137,8 @@ const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem('user');
-      if (!saved) return null;
-      const parsed = JSON.parse(saved);
-      if (parsed && typeof parsed.balance === 'undefined') {
-        parsed.balance = 0;
-      }
-      return parsed;
-    } catch (e) {
-      console.error("Failed to parse user from localStorage", e);
-      return null;
-    }
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<'buyer' | 'seller' | 'auth'>('auth');
   const [buyerStep, setBuyerStep] = useState<'map' | 'sellers' | 'items' | 'search' | 'nearby' | 'boutiques' | 'messages'>('map');
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -141,12 +154,7 @@ export default function App() {
   const [isExpandedMap, setIsExpandedMap] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(() => {
-    if (user?.lat && user?.lng) {
-      return { lat: user.lat, lng: user.lng };
-    }
-    return null;
-  });
+  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
   const [isTracking, setIsTracking] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -174,7 +182,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'items' | 'orders' | 'messages'>('items');
   const [conversations, setConversations] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [socket, setSocket] = useState<any>(null);
   const [buyerTab, setBuyerTab] = useState<'shop' | 'orders'>('shop');
 
   const categories = [
@@ -212,65 +219,94 @@ export default function App() {
     market_id: 0
   });
 
+  // --- Firebase Auth & Real-time Listeners ---
   useEffect(() => {
-    if (user?.lat && user?.lng) {
-      setUserLocation({ lat: user.lat, lng: user.lng });
-      if (user.role === 'seller') {
-        setSellerLat(user.lat);
-        setSellerLng(user.lng);
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        if (userDoc.exists()) {
+          setUser({ id: firebaseUser.uid, ...userDoc.data() } as User);
+        }
+      } else {
+        setUser(null);
       }
-    }
-  }, [user?.id]);
+      setIsAuthReady(true);
+    });
 
-  const loadConversations = async () => {
-    try {
-      const res = await fetchWithAuth('/conversations');
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(data);
-        const totalUnread = data.reduce((sum: number, conv: any) => sum + conv.unread_count, 0);
-        setUnreadCount(totalUnread);
+    return () => unsubscribeAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribeUser = onSnapshot(doc(db, 'users', user.id), (doc) => {
+      if (doc.exists()) {
+        setUser(prev => prev ? { ...prev, ...doc.data() } : null);
       }
-    } catch (e) {
-      console.error("Failed to load conversations", e);
-    }
-  };
+    });
+
+    const unsubscribeMarkets = onSnapshot(collection(db, 'markets'), (snapshot) => {
+      setMarkets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Market)));
+    });
+
+    const unsubscribeItems = onSnapshot(collection(db, 'items'), (snapshot) => {
+      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Item)));
+    });
+
+    const unsubscribeSellers = onSnapshot(
+      query(collection(db, 'users'), where('role', 'in', ['seller', 'both'])),
+      (snapshot) => {
+        setSellers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Seller)));
+      }
+    );
+
+    const qOrders = view === 'buyer' 
+      ? query(collection(db, 'orders'), where('buyer_id', '==', user.id), orderBy('created_at', 'desc'))
+      : query(collection(db, 'orders'), where('seller_id', '==', user.id), orderBy('created_at', 'desc'));
+    
+    const unsubscribeOrders = onSnapshot(qOrders, (snapshot) => {
+      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const qConversations = query(
+      collection(db, 'conversations'), 
+      where('participants', 'array-contains', user.id),
+      orderBy('last_message_at', 'desc')
+    );
+    const unsubscribeConversations = onSnapshot(qConversations, (snapshot) => {
+      const convs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setConversations(convs);
+      const totalUnread = convs.reduce((sum: number, conv: any) => {
+        const unread = conv.unread_counts?.[user.id] || 0;
+        return sum + unread;
+      }, 0);
+      setUnreadCount(totalUnread);
+    });
+
+    return () => {
+      unsubscribeUser();
+      unsubscribeMarkets();
+      unsubscribeItems();
+      unsubscribeSellers();
+      unsubscribeOrders();
+      unsubscribeConversations();
+    };
+  }, [user?.id, user?.role, view]);
 
   useEffect(() => {
-    if (user) {
-      const newSocket = io();
-      setSocket(newSocket);
-      newSocket.emit('join_user_room', user.id);
-      
-      newSocket.on('new_message_notification', (message) => {
-        loadConversations();
-      });
-
-      loadConversations();
-
-      return () => {
-        newSocket.disconnect();
-      };
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    console.log("App initialized. User:", user?.email);
     if (user) {
       if (user.role === 'both') {
-        setView('buyer'); // Default to buyer mode for 'both'
+        setView('buyer');
       } else {
         setView(user.role);
       }
+      if (user.theme) setTheme(user.theme);
     } else {
       setView('auth');
     }
-    loadMarkets().catch(err => console.error("Failed to load markets", err));
     
-    // Safety timeout to ensure loading screen disappears
     const timer = setTimeout(() => setLoading(false), 2000);
 
-    // Get user location
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -289,92 +325,19 @@ export default function App() {
         navigator.geolocation.clearWatch(watchId.current);
       }
     };
-  }, [user]);
+  }, [user?.id]);
 
-  useEffect(() => {
-    if (view === 'buyer') {
-      if (buyerStep === 'map') {
-        loadMarkets();
-      } else if (buyerStep === 'sellers' && selectedMarket) {
-        loadSellers(selectedMarket.id);
-      } else if (buyerStep === 'items' && selectedSeller) {
-        loadItems();
-      } else if (buyerStep === 'orders') {
-        loadOrders();
-      }
-    } else if (view === 'seller' && !showItemForm) {
-      if (activeTab === 'items') {
-        loadItems();
-      } else if (activeTab === 'orders') {
-        loadOrders();
-      }
+  const updateOrderStatus = async (orderId: string, status: string) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { status });
+    } catch (e) {
+      console.error("Failed to update order status", e);
     }
-    if (user) {
-      loadOrders();
-      if (user.theme) setTheme(user.theme);
-    }
-  }, [view, buyerStep, selectedMarket, selectedSeller, selectedCategory, showItemForm, minPrice, maxPrice, user]);
-
-  const loadOrders = async () => {
-    const res = await fetchWithAuth('/orders');
-    if (res.ok) {
-      const data = await res.json();
-      setOrders(data);
-    }
-  };
-
-  const updateOrderStatus = async (orderId: number, status: string) => {
-    const res = await fetchWithAuth(`/orders/${orderId}/status`, {
-      method: 'PUT',
-      body: JSON.stringify({ status })
-    });
-    if (res.ok) {
-      loadOrders();
-    }
-  };
-
-  const loadMarkets = async () => {
-    const res = await fetch(`${API_BASE}/markets`);
-    const data = await res.json();
-    setMarkets(data);
-  };
-
-  const loadSellers = async (marketId: number) => {
-    const res = await fetch(`${API_BASE}/markets/${marketId}/sellers`);
-    const data = await res.json();
-    setSellers(data);
-    // If it's a boutique (only one seller), select it automatically
-    if (data.length === 1 && selectedMarket?.type === 'boutique') {
-      setSelectedSeller(data[0]);
-      setBuyerStep('items');
-    }
-  };
-
-  const loadBoutiques = async () => {
-    const res = await fetch(`${API_BASE}/sellers`);
-    const data = await res.json();
-    setBoutiques(data);
   };
 
   const loadItems = async (searchQuery?: string) => {
-    const params = new URLSearchParams();
-    if (minPrice) params.append('min_price', minPrice);
-    if (maxPrice) params.append('max_price', maxPrice);
-
-    if (view === 'buyer') {
-      if (selectedMarket) params.append('market_id', selectedMarket.id.toString());
-      if (selectedSeller) params.append('seller_id', selectedSeller.id.toString());
-      if (selectedCategory) params.append('category', selectedCategory);
-      if (searchQuery) params.append('name', searchQuery);
-      
-      const res = await fetch(`${API_BASE}/items?${params.toString()}`);
-      const data = await res.json();
-      setItems(data);
-    } else if (view === 'seller') {
-      const res = await fetchWithAuth(`/my-items?${params.toString()}`);
-      const data = await res.json();
-      setItems(data);
-    }
+    // Firestore listeners handle this automatically, but we can filter here if needed
+    // or use a separate query for global search
   };
 
   const saveCurrentLocation = () => {
@@ -548,66 +511,89 @@ export default function App() {
       if (existing) {
         return prev.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i);
       }
-      return [...prev, { id: item.id, name: item.name, price: item.price, quantity: 1, seller_id: item.seller_id }];
+      return [...prev, { 
+        id: item.id, 
+        name: item.name, 
+        price: item.price, 
+        quantity: 1, 
+        seller_id: item.seller_id,
+        seller_name: item.seller_name || 'Vendeur'
+      }];
     });
     setShowCart(true);
   };
 
-  const updateCartQuantity = (id: number, delta: number) => {
+  const updateCartQuantity = (id: string, delta: number) => {
     setCartItems(prev => prev.map(i => i.id === id ? { ...i, quantity: Math.max(1, i.quantity + delta) } : i));
   };
 
-  const removeFromCart = (id: number) => {
+  const removeFromCart = (id: string) => {
     setCartItems(prev => prev.filter(i => i.id !== id));
   };
 
-  const handleCheckout = async (sellerId: number, options: { payOnline: boolean; deliveryType: 'pickup' | 'delivery' }) => {
+  const handleCheckout = async (sellerId: string, options: { payOnline: boolean; deliveryType: 'pickup' | 'delivery' }) => {
+    if (!user) return;
     const sellerItems = cartItems.filter(i => i.seller_id === sellerId);
     const total = sellerItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    const seller = sellers.find(s => s.id === sellerId);
     
-    const res = await fetchWithAuth('/orders', {
-      method: 'POST',
-      body: JSON.stringify({ 
-        seller_id: sellerId, 
-        total, 
-        items: sellerItems, 
-        pay_online: options.payOnline,
-        delivery_type: options.deliveryType
-      })
-    });
-    
-    if (res.ok) {
-      const data = await res.json();
-      alert(data.message);
-      setCartItems(prev => prev.filter(i => i.seller_id !== sellerId));
+    try {
       if (options.payOnline) {
-        setLastInvoice(data);
-        // Refresh user balance
-        const balanceRes = await fetchWithAuth('/balance');
-        const balanceData = await balanceRes.json();
-        setUser(prev => prev ? { ...prev, balance: balanceData.balance } : null);
+        if (user.balance < total) {
+          alert("Solde insuffisant.");
+          return;
+        }
+        // Deduct balance
+        await updateDoc(doc(db, 'users', user.id), {
+          balance: increment(-total)
+        });
+        // Add to seller balance
+        await updateDoc(doc(db, 'users', sellerId), {
+          balance: increment(total)
+        });
       }
-    } else {
-      const err = await res.json();
-      alert(err.error || 'Erreur lors de la commande');
+
+      await addDoc(collection(db, 'orders'), {
+        buyer_id: user.id,
+        seller_id: sellerId,
+        total,
+        items: sellerItems,
+        pay_online: options.payOnline,
+        delivery_type: options.deliveryType,
+        status: 'pending',
+        created_at: serverTimestamp(),
+        buyer_name: user.name,
+        buyer_email: user.email,
+        buyer_phone: user.phone || '',
+        seller_name: seller?.name || '',
+        seller_shop_name: seller?.shop_name || '',
+        seller_phone: seller?.phone || ''
+      });
+
+      setCartItems(prev => prev.filter(i => i.seller_id !== sellerId));
+      alert("Commande envoyée avec succès !");
+    } catch (e) {
+      console.error("Checkout error", e);
+      alert("Erreur lors de la commande.");
     }
   };
 
   const handleAddFunds = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amount = parseFloat(addAmount);
+    if (!user || !addAmount) return;
+    const amount = parseInt(addAmount);
     if (isNaN(amount) || amount <= 0) return;
 
-    const res = await fetchWithAuth('/balance/add', {
-      method: 'POST',
-      body: JSON.stringify({ amount })
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      setUser(prev => prev ? { ...prev, balance: data.balance } : null);
+    try {
+      await updateDoc(doc(db, 'users', user.id), {
+        balance: increment(amount)
+      });
       setAddAmount('');
-      alert(`Fonds ajoutés avec succès ! Nouveau solde : ${data.balance.toLocaleString()} FCFA`);
+      setShowWallet(false);
+      alert("Fonds ajoutés avec succès !");
+    } catch (e) {
+      console.error("Add funds error", e);
+      alert("Erreur lors de l'ajout des fonds.");
     }
   };
 
@@ -618,134 +604,126 @@ export default function App() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    const endpoint = authMode === 'login' ? '/auth/login' : '/auth/register';
-    const body = authMode === 'login' ? { email, password } : { 
-      email, 
-      password, 
-      role, 
-      name,
-      shop_name: shopName,
-      seller_type: sellerType,
-      phone,
-      bank_info: bankInfo,
-      lat: sellerLat,
-      lng: sellerLng
-    };
-    
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    
-    if (res.ok) {
-      const data = await res.json();
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      setUser(data.user);
-      if (authMode === 'register') {
-        setShowWelcome(data.user.welcome_code);
-      }
-    } else {
-      const err = await res.json();
-      if (err.error === "Email already exists") {
-        alert("⚠️ Cet e-mail est déjà utilisé. Veuillez vous connecter ou utiliser une autre adresse.");
+    setLoading(true);
+    try {
+      if (authMode === 'login') {
+        await signInWithEmailAndPassword(auth, email, password);
       } else {
-        alert(err.error || 'Erreur d\'authentification');
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const firebaseUser = userCredential.user;
+        
+        const welcomeCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const userData = {
+          email,
+          name,
+          role,
+          balance: 0,
+          welcome_code: welcomeCode,
+          shop_name: shopName,
+          seller_type: sellerType,
+          phone,
+          bank_info: bankInfo,
+          lat: sellerLat,
+          lng: sellerLng,
+          created_at: serverTimestamp(),
+          theme: 'default'
+        };
+        
+        await setDoc(doc(db, 'users', firebaseUser.uid), userData);
+        setUser({ id: firebaseUser.uid, ...userData } as User);
+        setShowWelcome(welcomeCode);
       }
+    } catch (error: any) {
+      console.error("Auth error", error);
+      alert(error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = await fetchWithAuth('/user/profile', {
-      method: 'PUT',
-      body: JSON.stringify({ name, shop_name: shopName, seller_type: sellerType, phone, bank_info: bankInfo, theme })
-    });
-    
-    if (res.ok) {
-      const data = await res.json();
-      setUser(data.user);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      setShowProfileSettings(false);
-      alert("Profil mis à jour avec succès !");
-    } else {
-      const err = await res.json();
-      alert(err.error || "Erreur lors de la mise à jour du profil");
-    }
-  };
-
-  const handleDeleteAccount = async () => {
-    const res = await fetchWithAuth('/user', { method: 'DELETE' });
-    if (res.ok) {
-      handleLogout();
-      alert("Votre compte a été supprimé.");
-    } else {
-      alert("Erreur lors de la suppression du compte.");
-    }
-    setShowDeleteConfirm(false);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const handleLogout = async () => {
+    await signOut(auth);
     setUser(null);
     setView('auth');
   };
 
-  const handleSaveItem = async (e: React.FormEvent) => {
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Ensure a category is selected if it's still empty
-    const itemToSave = { 
-      ...newItem, 
-      category: newItem.category || categories[0],
-      market_id: Number(newItem.market_id) || 0
-    };
-
-    const method = editingItem ? 'PUT' : 'POST';
-    const url = editingItem ? `/items/${editingItem.id}` : '/items';
-    
+    if (!user) return;
     try {
-      const res = await fetchWithAuth(url, {
-        method,
-        body: JSON.stringify(itemToSave)
+      await updateDoc(doc(db, 'users', user.id), { 
+        name, 
+        shop_name: shopName, 
+        seller_type: sellerType, 
+        phone, 
+        bank_info: bankInfo, 
+        theme 
       });
-      
-      if (res.ok) {
-        // If seller location is set, update it on the server too
-        if (sellerLat && sellerLng) {
-          await fetchWithAuth('/user/location', {
-            method: 'POST',
-            body: JSON.stringify({ lat: sellerLat, lng: sellerLng })
-          });
-          // Update local user object
-          if (user) {
-            const updatedUser = { ...user, lat: sellerLat, lng: sellerLng };
-            setUser(updatedUser);
-            localStorage.setItem('user', JSON.stringify(updatedUser));
-          }
-        }
-
-        setShowItemForm(false);
-        setEditingItem(null);
-        setNewItem({ name: '', description: '', price: 0, photo: '', category: '', market_id: 0 });
-        loadItems();
-        alert(editingItem ? "Article modifié avec succès !" : "Article ajouté avec succès !");
-      } else {
-        const errorData = await res.json();
-        alert(`Erreur: ${errorData.error || "Impossible d'enregistrer l'article"}`);
-      }
-    } catch (error) {
-      console.error("Save item error:", error);
-      alert("Une erreur réseau est survenue.");
+      setShowProfileSettings(false);
+      alert("Profil mis à jour avec succès !");
+    } catch (e) {
+      console.error("Profile update error", e);
+      alert("Erreur lors de la mise à jour du profil");
     }
   };
 
-  const handleDeleteItem = async (id: number) => {
-    if (confirm('Voulez-vous supprimer cet article ?')) {
-      const res = await fetchWithAuth(`/items/${id}`, { method: 'DELETE' });
-      if (res.ok) loadItems();
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    try {
+      const firebaseUser = auth.currentUser;
+      if (firebaseUser) {
+        await deleteDoc(doc(db, 'users', user.id));
+        await deleteUser(firebaseUser);
+        handleLogout();
+        alert("Votre compte a été supprimé.");
+      }
+    } catch (e) {
+      console.error("Delete account error", e);
+      alert("Erreur lors de la suppression du compte. Veuillez vous reconnecter et réessayer.");
+    }
+    setShowDeleteConfirm(false);
+  };
+
+
+  const handleSaveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    
+    try {
+      const itemData = {
+        ...newItem,
+        category: newItem.category || categories[0],
+        market_id: newItem.market_id || '',
+        seller_id: user.id,
+        seller_name: user.shop_name || user.name,
+        updated_at: serverTimestamp()
+      };
+
+      if (editingItem) {
+        await updateDoc(doc(db, 'items', editingItem.id), itemData);
+      } else {
+        await addDoc(collection(db, 'items'), {
+          ...itemData,
+          created_at: serverTimestamp()
+        });
+      }
+      setShowItemForm(false);
+      setEditingItem(null);
+      setNewItem({ name: '', description: '', price: 0, photo: '', category: '', market_id: '' });
+      alert(editingItem ? "Article modifié avec succès !" : "Article ajouté avec succès !");
+    } catch (e) {
+      console.error("Save item error", e);
+      alert("Erreur lors de l'enregistrement de l'article.");
+    }
+  };
+
+  const handleDeleteItem = async (id: string) => {
+    if (!confirm("Supprimer cet article ?")) return;
+    try {
+      await deleteDoc(doc(db, 'items', id));
+    } catch (e) {
+      console.error("Delete item error", e);
+      alert("Erreur lors de la suppression.");
     }
   };
 
@@ -1126,7 +1104,6 @@ export default function App() {
                 <button 
                   onClick={() => {
                     setBuyerStep('boutiques');
-                    loadBoutiques();
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all whitespace-nowrap ${buyerStep === 'boutiques' ? 'bg-orange-600 text-white shadow-lg shadow-orange-100' : 'bg-white text-slate-400 hover:text-slate-600 border border-slate-100'}`}
                 >
@@ -1136,22 +1113,6 @@ export default function App() {
                 <button 
                   onClick={() => {
                     setBuyerStep('messages');
-                    loadConversations();
-                  }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all whitespace-nowrap relative ${buyerStep === 'messages' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-slate-400 hover:text-slate-600 border border-slate-100'}`}
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  Messages
-                  {unreadCount > 0 && (
-                    <span className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-black">
-                      {unreadCount}
-                    </span>
-                  )}
-                </button>
-                <button 
-                  onClick={() => {
-                    setBuyerStep('messages');
-                    loadConversations();
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all whitespace-nowrap relative ${buyerStep === 'messages' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-slate-400 hover:text-slate-600 border border-slate-100'}`}
                 >
@@ -1496,7 +1457,6 @@ export default function App() {
                             <button 
                               onClick={() => {
                                 setMarketSearch('');
-                                loadMarkets();
                                 setIsExpandedMap(true);
                               }}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[9px] sm:text-[10px] font-black bg-slate-50 text-slate-400 hover:bg-slate-100 transition-all"
@@ -1559,7 +1519,7 @@ export default function App() {
                       isExpanded={isExpandedMap}
                       onToggleExpand={() => setIsExpandedMap(false)}
                       showItinerary={isExpandedMap && !!selectedMarket}
-                      highlightedMarketIds={highlightedMarketIds as number[]}
+                      highlightedMarketIds={highlightedMarketIds as string[]}
                     />
                   </div>
                 </div>
@@ -2081,7 +2041,7 @@ export default function App() {
                           </div>
                           
                           <div className="bg-slate-50 rounded-3xl p-6 space-y-3">
-                            {JSON.parse(order.items_json).map((item: any, idx: number) => (
+                            {(order.items || []).map((item: any, idx: number) => (
                               <div key={idx} className="flex justify-between items-center text-sm font-bold">
                                 <span className="text-slate-600">{item.quantity}x {item.name}</span>
                                 <span className="text-slate-900">{(item.price * item.quantity).toLocaleString()} FCFA</span>
@@ -2092,7 +2052,7 @@ export default function App() {
                           <div className="mt-8 flex items-center justify-between">
                             <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
                               <Clock className="w-4 h-4" />
-                              {new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              { (order.created_at?.toDate?.() || new Date(order.created_at)).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
                             </div>
                             <a 
                               href={`tel:${order.seller_phone}`}
@@ -2445,7 +2405,7 @@ export default function App() {
                           </div>
                           
                           <div className="bg-slate-50 rounded-3xl p-6 space-y-3">
-                            {JSON.parse(order.items_json).map((item: any, idx: number) => (
+                            {(order.items || []).map((item: any, idx: number) => (
                               <div key={idx} className="flex justify-between items-center text-sm font-bold">
                                 <span className="text-slate-600">{item.quantity}x {item.name}</span>
                                 <span className="text-slate-900">{(item.price * item.quantity).toLocaleString()} FCFA</span>
@@ -2456,7 +2416,7 @@ export default function App() {
                           <div className="mt-8 flex items-center justify-between">
                             <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
                               <Clock className="w-4 h-4" />
-                              {new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              { (order.created_at?.toDate?.() || new Date(order.created_at)).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
                             </div>
                             <a 
                               href={`tel:${order.buyer_phone}`}
@@ -2956,9 +2916,8 @@ export default function App() {
             otherUser={activeChat} 
             onClose={() => {
               setActiveChat(null);
-              loadConversations();
             }} 
-            marketId={selectedMarket?.id || 0}
+            marketId={selectedMarket?.id || ''}
           />
         )}
       </AnimatePresence>

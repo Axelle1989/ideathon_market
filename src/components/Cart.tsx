@@ -3,24 +3,25 @@ import { ShoppingCart, Trash2, Send, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface CartItem {
-  id: number;
+  id: string;
   name: string;
   price: number;
   quantity: number;
-  seller_id: number;
+  seller_id: string;
+  seller_name?: string;
 }
 
 interface CartProps {
   items: CartItem[];
   userBalance: number;
-  onRemove: (id: number) => void;
-  onUpdateQuantity: (id: number, delta: number) => void;
-  onCheckout: (sellerId: number, options: { payOnline: boolean; deliveryType: 'pickup' | 'delivery' }) => void;
+  onRemove: (id: string) => void;
+  onUpdateQuantity: (id: string, delta: number) => void;
+  onCheckout: (sellerId: string, options: { payOnline: boolean; deliveryType: 'pickup' | 'delivery' }) => void;
   onClose: () => void;
 }
 
 export default function Cart({ items, userBalance, onRemove, onUpdateQuantity, onCheckout, onClose }: CartProps) {
-  const [checkoutOptions, setCheckoutOptions] = React.useState<Record<number, { payOnline: boolean; deliveryType: 'pickup' | 'delivery' }>>({});
+  const [checkoutOptions, setCheckoutOptions] = React.useState<Record<string, { payOnline: boolean; deliveryType: 'pickup' | 'delivery' }>>({});
 
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   
@@ -38,9 +39,9 @@ export default function Cart({ items, userBalance, onRemove, onUpdateQuantity, o
     }
     acc[item.seller_id].push(item);
     return acc;
-  }, {} as Record<number, CartItem[]>);
+  }, {} as Record<string, CartItem[]>);
 
-  const updateOption = (sellerId: number, key: 'payOnline' | 'deliveryType', value: any) => {
+  const updateOption = (sellerId: string, key: 'payOnline' | 'deliveryType', value: any) => {
     setCheckoutOptions(prev => ({
       ...prev,
       [sellerId]: { ...prev[sellerId], [key]: value }
@@ -82,10 +83,12 @@ export default function Cart({ items, userBalance, onRemove, onUpdateQuantity, o
             <div key={sellerId} className="space-y-6">
               <div className="flex flex-col gap-4 border-b border-slate-50 pb-6">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Vendeur #{sellerId}</h3>
+                  <h3 className="font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">
+                    {sellerItems[0].seller_name || `Vendeur #${sellerId.substring(0, 6)}`}
+                  </h3>
                   <button 
                     onClick={() => {
-                      const options = checkoutOptions[Number(sellerId)] || { payOnline: false, deliveryType: 'pickup' };
+                      const options = checkoutOptions[sellerId] || { payOnline: false, deliveryType: 'pickup' };
                       const sellerTotal = sellerItems.reduce((s, i) => s + i.price * i.quantity, 0);
                       
                       if (options.payOnline && userBalance < sellerTotal) {
@@ -93,7 +96,7 @@ export default function Cart({ items, userBalance, onRemove, onUpdateQuantity, o
                         return;
                       }
                       
-                      onCheckout(Number(sellerId), options);
+                      onCheckout(sellerId, options);
                     }}
                     className="bg-blue-600 text-white text-[10px] font-black px-6 py-3 rounded-2xl hover:bg-blue-700 flex items-center gap-2 shadow-lg shadow-blue-100 transition-all uppercase tracking-widest"
                   >
@@ -106,14 +109,14 @@ export default function Cart({ items, userBalance, onRemove, onUpdateQuantity, o
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Mode</label>
                     <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100">
                       <button 
-                        onClick={() => updateOption(Number(sellerId), 'deliveryType', 'pickup')}
-                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${checkoutOptions[Number(sellerId)]?.deliveryType === 'pickup' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+                        onClick={() => updateOption(sellerId, 'deliveryType', 'pickup')}
+                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${checkoutOptions[sellerId]?.deliveryType === 'pickup' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
                       >
                         Retrait
                       </button>
                       <button 
-                        onClick={() => updateOption(Number(sellerId), 'deliveryType', 'delivery')}
-                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${checkoutOptions[Number(sellerId)]?.deliveryType === 'delivery' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+                        onClick={() => updateOption(sellerId, 'deliveryType', 'delivery')}
+                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${checkoutOptions[sellerId]?.deliveryType === 'delivery' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
                       >
                         Livraison
                       </button>
@@ -123,14 +126,14 @@ export default function Cart({ items, userBalance, onRemove, onUpdateQuantity, o
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Paiement</label>
                     <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100">
                       <button 
-                        onClick={() => updateOption(Number(sellerId), 'payOnline', false)}
-                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${!checkoutOptions[Number(sellerId)]?.payOnline ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+                        onClick={() => updateOption(sellerId, 'payOnline', false)}
+                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${!checkoutOptions[sellerId]?.payOnline ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
                       >
                         Cash
                       </button>
                       <button 
-                        onClick={() => updateOption(Number(sellerId), 'payOnline', true)}
-                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${checkoutOptions[Number(sellerId)]?.payOnline ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+                        onClick={() => updateOption(sellerId, 'payOnline', true)}
+                        className={`flex-1 py-2 text-[10px] font-black rounded-lg transition-all ${checkoutOptions[sellerId]?.payOnline ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
                       >
                         En ligne
                       </button>

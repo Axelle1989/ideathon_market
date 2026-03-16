@@ -1,21 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, X, MessageSquare, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { io, Socket } from 'socket.io-client';
+import { db } from '../firebase';
+import { 
+  collection, 
+  doc, 
+  addDoc, 
+  onSnapshot, 
+  query, 
+  where, 
+  orderBy, 
+  serverTimestamp,
+  setDoc,
+  getDoc,
+  updateDoc,
+  increment
+} from 'firebase/firestore';
 
 interface Message {
-  id: number;
-  sender_id: number;
-  receiver_id: number;
-  market_id: number;
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  market_id: string;
   content: string;
-  created_at: string;
+  created_at: any;
 }
 
 interface ChatBoxProps {
   currentUser: any;
   otherUser: any;
-  marketId: number;
+  marketId: string;
   onClose: () => void;
 }
 
@@ -24,7 +38,6 @@ export default function ChatBox({ currentUser, otherUser, marketId, onClose }: C
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [socket, setSocket] = useState<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -37,41 +50,78 @@ export default function ChatBox({ currentUser, otherUser, marketId, onClose }: C
 
   useEffect(() => {
     if (!currentUser || !otherUser) return;
-    const newSocket = io();
-    setSocket(newSocket);
 
-    const room = `chat_${marketId}_${currentUser.id}_${otherUser.id}`;
-    newSocket.emit('join_chat', room);
+    const participants = [currentUser.id, otherUser.id].sort();
+    const conversationId = `${marketId}_${participants[0]}_${participants[1]}`;
 
-    // Fetch history
-    fetch(`/api/messages?other_user_id=${otherUser.id}&market_id=${marketId}`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => res.json())
-      .then(data => setMessages(data));
+    // Ensure conversation document exists
+    const ensureConversation = async () => {
+      const convRef = doc(db, 'conversations', conversationId);
+      const convDoc = await getDoc(convRef);
+      if (!convDoc.exists()) {
+        await setDoc(convRef, {
+          participants,
+          market_id: marketId,
+          last_message: '',
+          last_message_at: serverTimestamp(),
+          unread_counts: {
+            [currentUser.id]: 0,
+            [otherUser.id]: 0
+          }
+        });
+      } else {
+        // Reset unread count for current user
+        await updateDoc(convRef, {
+          [`unread_counts.${currentUser.id}`]: 0
+        });
+      }
+    };
+    ensureConversation();
 
-    newSocket.on('receive_message', (message: Message) => {
-      setMessages(prev => [...prev, message]);
+    const q = query(
+      collection(db, 'messages'),
+      where('conversation_id', '==', conversationId),
+      orderBy('created_at', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
+      setMessages(msgs);
     });
 
-    return () => {
-      newSocket.disconnect();
-    };
+    return () => unsubscribe();
   }, [marketId, otherUser.id, currentUser.id]);
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !socket) return;
+    if (!newMessage.trim()) return;
 
-    const messageData = {
-      sender_id: currentUser.id,
-      receiver_id: otherUser.id,
-      market_id: marketId,
-      content: newMessage
-    };
+    const participants = [currentUser.id, otherUser.id].sort();
+    const conversationId = `${marketId}_${participants[0]}_${participants[1]}`;
 
-    socket.emit('send_message', messageData);
-    setNewMessage('');
+    try {
+      const messageData = {
+        conversation_id: conversationId,
+        sender_id: currentUser.id,
+        receiver_id: otherUser.id,
+        market_id: marketId,
+        content: newMessage,
+        created_at: serverTimestamp()
+      };
+
+      await addDoc(collection(db, 'messages'), messageData);
+      
+      // Update conversation summary
+      await updateDoc(doc(db, 'conversations', conversationId), {
+        last_message: newMessage,
+        last_message_at: serverTimestamp(),
+        [`unread_counts.${otherUser.id}`]: increment(1)
+      });
+
+      setNewMessage('');
+    } catch (e) {
+      console.error("Error sending message", e);
+    }
   };
 
   return (
