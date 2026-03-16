@@ -94,6 +94,13 @@ try {
   // Columns probably already exist
 }
 
+// Migration: Add seller_type if missing
+try {
+  db.exec("ALTER TABLE users ADD COLUMN seller_type TEXT DEFAULT 'boutique'");
+} catch (e) {
+  // Column probably already exists
+}
+
 // Migration: Add is_read to messages if missing
 try {
   db.exec("ALTER TABLE messages ADD COLUMN is_read INTEGER DEFAULT 0");
@@ -176,7 +183,7 @@ async function startServer() {
 
   // Auth Routes
   app.post("/api/auth/register", (req, res) => {
-    const { email, password, role, name, shop_name, phone, bank_info, lat, lng } = req.body;
+    const { email, password, role, name, shop_name, seller_type, phone, bank_info, lat, lng } = req.body;
     
     // Check if user already exists
     const existingUser = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
@@ -187,8 +194,8 @@ async function startServer() {
     const hashedPassword = bcrypt.hashSync(password, 10);
     const welcomeCode = `BIENVENUE-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     try {
-      const stmt = db.prepare("INSERT INTO users (email, password, role, name, welcome_code, shop_name, phone, bank_info, lat, lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      const result = stmt.run(email, hashedPassword, role, name, welcomeCode, shop_name || null, phone || null, bank_info || null, lat || null, lng || null);
+      const stmt = db.prepare("INSERT INTO users (email, password, role, name, welcome_code, shop_name, seller_type, phone, bank_info, lat, lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const result = stmt.run(email, hashedPassword, role, name, welcomeCode, shop_name || null, seller_type || 'boutique', phone || null, bank_info || null, lat || null, lng || null);
       const token = jwt.sign({ id: result.lastInsertRowid, email, role, name }, JWT_SECRET);
       res.json({ token, user: { 
         id: result.lastInsertRowid, 
@@ -198,6 +205,7 @@ async function startServer() {
         balance: 0, 
         welcome_code: welcomeCode,
         shop_name,
+        seller_type: seller_type || 'boutique',
         phone,
         bank_info,
         lat,
@@ -243,10 +251,10 @@ async function startServer() {
   });
 
   app.put("/api/user/profile", authenticateToken, (req: any, res) => {
-    const { name, shop_name, phone, bank_info, theme } = req.body;
+    const { name, shop_name, seller_type, phone, bank_info, theme } = req.body;
     try {
-      db.prepare("UPDATE users SET name = ?, shop_name = ?, phone = ?, bank_info = ?, theme = ? WHERE id = ?")
-        .run(name, shop_name, phone, bank_info, theme || 'default', req.user.id);
+      db.prepare("UPDATE users SET name = ?, shop_name = ?, seller_type = ?, phone = ?, bank_info = ?, theme = ? WHERE id = ?")
+        .run(name, shop_name, seller_type || 'boutique', phone, bank_info, theme || 'default', req.user.id);
       
       const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id) as any;
       res.json({ 
@@ -258,6 +266,7 @@ async function startServer() {
           name: user.name, 
           balance: user.balance,
           shop_name: user.shop_name,
+          seller_type: user.seller_type,
           phone: user.phone,
           bank_info: user.bank_info,
           lat: user.lat,

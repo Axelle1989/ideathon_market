@@ -48,6 +48,7 @@ interface User {
   lat?: number;
   lng?: number;
   bank_info?: string;
+  seller_type?: 'boutique' | 'market';
 }
 
 interface Market {
@@ -192,6 +193,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'buyer' | 'seller' | 'both'>('buyer');
+  const [sellerType, setSellerType] = useState<'boutique' | 'market'>('boutique');
   const [shopName, setShopName] = useState('');
   const [phone, setPhone] = useState('');
   const [bankInfo, setBankInfo] = useState('');
@@ -623,6 +625,7 @@ export default function App() {
       role, 
       name,
       shop_name: shopName,
+      seller_type: sellerType,
       phone,
       bank_info: bankInfo,
       lat: sellerLat,
@@ -657,7 +660,7 @@ export default function App() {
     e.preventDefault();
     const res = await fetchWithAuth('/user/profile', {
       method: 'PUT',
-      body: JSON.stringify({ name, shop_name: shopName, phone, bank_info: bankInfo, theme })
+      body: JSON.stringify({ name, shop_name: shopName, seller_type: sellerType, phone, bank_info: bankInfo, theme })
     });
     
     if (res.ok) {
@@ -807,6 +810,7 @@ export default function App() {
                   onClick={() => {
                     setName(user.name);
                     setShopName(user.shop_name || '');
+                    setSellerType(user.seller_type || 'boutique');
                     setPhone(user.phone || '');
                     setBankInfo(user.bank_info || '');
                     setShowProfileSettings(true);
@@ -872,16 +876,61 @@ export default function App() {
                       {(role === 'seller' || role === 'both') && (
                         <>
                           <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Nom de la boutique</label>
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 ml-1">Type de vendeur</label>
+                            <div className="flex gap-6 mb-4 ml-1">
+                              <label className="flex items-center gap-2 cursor-pointer group">
+                                <div className="relative flex items-center justify-center">
+                                  <input 
+                                    type="radio" 
+                                    name="sellerType"
+                                    className="peer appearance-none w-5 h-5 border-2 border-slate-200 rounded-full checked:border-blue-500 transition-all"
+                                    checked={sellerType === 'boutique'}
+                                    onChange={() => {
+                                      setSellerType('boutique');
+                                      setShopName('');
+                                    }}
+                                  />
+                                  <div className="absolute w-2.5 h-2.5 bg-blue-500 rounded-full opacity-0 peer-checked:opacity-100 transition-all" />
+                                </div>
+                                <span className="text-sm font-bold text-slate-600 group-hover:text-blue-600 transition-colors">Boutique</span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer group">
+                                <div className="relative flex items-center justify-center">
+                                  <input 
+                                    type="radio" 
+                                    name="sellerType"
+                                    className="peer appearance-none w-5 h-5 border-2 border-slate-200 rounded-full checked:border-blue-500 transition-all"
+                                    checked={sellerType === 'market'}
+                                    onChange={() => {
+                                      setSellerType('market');
+                                      setShopName('');
+                                    }}
+                                  />
+                                  <div className="absolute w-2.5 h-2.5 bg-blue-500 rounded-full opacity-0 peer-checked:opacity-100 transition-all" />
+                                </div>
+                                <span className="text-sm font-bold text-slate-600 group-hover:text-blue-600 transition-colors">Marché</span>
+                              </label>
+                            </div>
+                          </div>
+                          
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            key={sellerType}
+                          >
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">
+                              {sellerType === 'boutique' ? 'Nom de la boutique' : 'Nom du marché'}
+                            </label>
                             <input 
                               type="text" 
                               required 
-                              placeholder="Ma Boutique"
+                              placeholder={sellerType === 'boutique' ? "Ma Boutique" : "Nom du Marché"}
                               className="w-full px-5 py-3.5 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all bg-slate-50/50"
                               value={shopName}
                               onChange={(e) => setShopName(e.target.value)}
                             />
-                          </div>
+                          </motion.div>
+                          
                           <div>
                             <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Numéro de téléphone</label>
                             <input 
@@ -2664,7 +2713,45 @@ export default function App() {
                 {(user.role === 'seller' || user.role === 'both') && (
                   <>
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Nom de la boutique</label>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 ml-1">Type de vendeur</label>
+                      <div className="flex gap-6 mb-4 ml-1">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <div className="relative flex items-center justify-center">
+                            <input 
+                              type="radio" 
+                              name="sellerTypeProfile"
+                              className="peer appearance-none w-5 h-5 border-2 border-slate-200 rounded-full checked:border-blue-500 transition-all"
+                              checked={sellerType === 'boutique'}
+                              onChange={() => setSellerType('boutique')}
+                            />
+                            <div className="absolute w-2.5 h-2.5 bg-blue-500 rounded-full opacity-0 peer-checked:opacity-100 transition-all" />
+                          </div>
+                          <span className="text-sm font-bold text-slate-600 group-hover:text-blue-600 transition-colors">Boutique</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <div className="relative flex items-center justify-center">
+                            <input 
+                              type="radio" 
+                              name="sellerTypeProfile"
+                              className="peer appearance-none w-5 h-5 border-2 border-slate-200 rounded-full checked:border-blue-500 transition-all"
+                              checked={sellerType === 'market'}
+                              onChange={() => setSellerType('market')}
+                            />
+                            <div className="absolute w-2.5 h-2.5 bg-blue-500 rounded-full opacity-0 peer-checked:opacity-100 transition-all" />
+                          </div>
+                          <span className="text-sm font-bold text-slate-600 group-hover:text-blue-600 transition-colors">Marché</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      key={sellerType}
+                    >
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">
+                        {sellerType === 'boutique' ? 'Nom de la boutique' : 'Nom du marché'}
+                      </label>
                       <input 
                         type="text" 
                         required 
@@ -2672,7 +2759,8 @@ export default function App() {
                         value={shopName}
                         onChange={(e) => setShopName(e.target.value)}
                       />
-                    </div>
+                    </motion.div>
+                    
                     <div>
                       <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Numéro de téléphone</label>
                       <input 
